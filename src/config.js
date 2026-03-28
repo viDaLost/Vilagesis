@@ -1,5 +1,5 @@
 export const GAME_CONFIG = {
-  saveKey: 'empire-east-3d-rts-save-v3',
+  saveKey: 'empire-east-3d-rts-save-v4',
   mapRadius: 13,
   hexSize: 1.74,
   axialScaleX: 0.93,
@@ -190,20 +190,32 @@ export const BUILDINGS = {
 export const UNITS = {
   worker: {
     name: 'Рабочий', icon: '🧑‍🌾', trainTime: 8,
-    cost: { food: 4 }, speed: 2.6, hp: 30, attack: 0, range: 0
+    cost: { food: 4 }, speed: 2.6, hp: 30, attack: 0, range: 0, role: 'worker'
   },
   militia: {
     name: 'Ополченец', icon: '🗡️', trainTime: 9,
-    cost: { gold: 16, food: 5 }, speed: 2.2, hp: 48, attack: 5, range: 0.8
+    cost: { gold: 16, food: 5 }, speed: 2.2, hp: 48, attack: 5, range: 0.8, role: 'melee'
   },
   swordsman: {
     name: 'Мечник', icon: '⚔️', trainTime: 12,
     cost: { gold: 24, food: 8 }, speed: 2.1, hp: 72, attack: 7, range: 0.85,
-    minEra: 1
+    minEra: 1, role: 'melee'
   },
   raider: {
     name: 'Налётчик', icon: '🔥', trainTime: 0,
-    cost: {}, speed: 2.0, hp: 42, attack: 6, range: .8, hostile: true
+    cost: {}, speed: 2.0, hp: 42, attack: 6, range: .8, hostile: true, role: 'melee', faction: 'clans'
+  },
+  raiderArcher: {
+    name: 'Налётчик-лучник', icon: '🏹', trainTime: 0,
+    cost: {}, speed: 1.95, hp: 36, attack: 5, range: 4.4, hostile: true, role: 'ranged', faction: 'clans'
+  },
+  brute: {
+    name: 'Крушитель', icon: '🪓', trainTime: 0,
+    cost: {}, speed: 1.55, hp: 96, attack: 10, range: 1.0, hostile: true, role: 'siege', faction: 'iron'
+  },
+  wolfRider: {
+    name: 'Волк-налётчик', icon: '🐺', trainTime: 0,
+    cost: {}, speed: 2.7, hp: 52, attack: 7, range: .9, hostile: true, role: 'melee', faction: 'beasts'
   }
 };
 

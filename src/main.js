@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GAME_CONFIG, BUILDINGS } from './config.js';
+import { GAME_CONFIG, BUILDINGS, UNITS } from './config.js';
 import { createInitialState } from './state.js';
 import { createScene } from './core/scene.js';
 import { generateWorld, getNeighbors, isTileInsideTerritory } from './systems/world.js';
@@ -7,18 +7,18 @@ import { renderTiles, renderRoads } from './systems/renderWorld.js';
 import { setupHud, updateHud } from './ui/hud.js';
 import { drawMinimap } from './ui/minimap.js';
 import { notify } from './ui/notifications.js';
-import { openBuildMenu, openQuickBuildMenu, openResearchMenu, openTrainMenu, bindDrawerClose, closeDrawer } from './ui/drawer.js';
+import { openBuildMenu, openQuickBuildMenu, openResearchMenu, openTrainMenu, bindDrawerClose, closeDrawer, openBuildingMenu } from './ui/drawer.js';
 import { setupModal, openModal, closeModal } from './ui/modal.js';
 import { updateSelection } from './ui/selection.js';
 import { setupInput } from './core/input.js';
-import { canPlaceBuilding, hasCost, payCost, placeConstruction, finishConstruction, getBuildingById, getBuildingOnTile, getCapital } from './systems/buildings.js';
+import { canPlaceBuilding, hasCost, payCost, placeConstruction, finishConstruction, getBuildingById, getBuildingOnTile, getCapital, startUpgrade, repairBuilding, destroyBuilding } from './systems/buildings.js';
 import { applyRealTimeEconomy, updateConstruction, collectFinishedConstruction, updateEra, updateObjectives, updateResearch } from './systems/economy.js';
-import { autoSpawnWorkers, queueTraining, updateTraining, updateUnits, spawnUnit } from './systems/units.js';
-import { updateDefense, updateProjectiles } from './systems/combat.js';
+import { autoSpawnWorkers, queueTraining, updateTraining, updateUnits } from './systems/units.js';
+import { updateDefense, updateProjectiles, spawnCollapse } from './systems/combat.js';
 import { maybeChangeWeather, updateEnemyWaves, updateEnvironmentState } from './systems/events.js';
 import { saveGame, clearSave } from './systems/persistence.js';
 import { $, $$ } from './ui/dom.js';
-import { clamp } from './utils/helpers.js';
+import { clamp, rand } from './utils/helpers.js';
 
 const state = createInitialState();
 const sceneCtx = createScene(document.getElementById('game'));
@@ -77,7 +77,7 @@ async function bootstrap() {
 
 async function spawnCapital() {
   const center = state.map.filter((t) => t.type !== 'water').sort((a, b) => Math.hypot(a.pos.x, a.pos.z) - Math.hypot(b.pos.x, b.pos.z))[0];
-  const job = { type: 'capital', tileId: center.id, progress: 0, buildTime: 0 };
+  const job = { type: 'capital', tileId: center.id, progress: 0, buildTime: 0, mode: 'new' };
   const capital = await finishConstruction(sceneCtx, state, job);
   state.capitalId = capital.id;
   center.buildingId = capital.id;
@@ -109,30 +109,48 @@ function createRoadNetworkFromCapital() {
   }
 }
 
+function makeCampMesh(tile, faction) {
+  const colors = { clans: 0x7a1711, iron: 0x666d76, beasts: 0x5c3c18 };
+  const mesh = new THREE.Group();
+  const matDark = new THREE.MeshStandardMaterial({ color: colors[faction] || 0x5a2118, roughness: 1 });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(.76, .94, .42, 6), matDark);
+  base.position.y = tile.height + .2;
+  base.castShadow = true;
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(.54, 1.02, 4), new THREE.MeshStandardMaterial({ color: (colors[faction] || 0x3e1713) - 0x101010, roughness: 1 }));
+  tent.position.y = tile.height + .82;
+  const fire = new THREE.Mesh(new THREE.OctahedronGeometry(.19), new THREE.MeshStandardMaterial({ color: 0xff9345, emissive: 0xff7836, emissiveIntensity: 1.1 }));
+  fire.position.y = tile.height + .48;
+  mesh.add(base, tent, fire);
+  if (faction === 'iron') {
+    const anvil = new THREE.Mesh(new THREE.BoxGeometry(.26, .18, .22), new THREE.MeshStandardMaterial({ color: 0x979a9f, roughness: 1 }));
+    anvil.position.set(.22, tile.height + .42, .16);
+    mesh.add(anvil);
+  } else if (faction === 'beasts') {
+    const skull = new THREE.Mesh(new THREE.ConeGeometry(.15, .22, 5), new THREE.MeshStandardMaterial({ color: 0xd2c2a2, roughness: 1 }));
+    skull.position.set(.24, tile.height + .58, .14);
+    skull.rotation.z = Math.PI;
+    mesh.add(skull);
+  } else {
+    const bannerPole = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, 1.3, 5), new THREE.MeshStandardMaterial({ color: 0x6d5330, roughness: 1 }));
+    bannerPole.position.set(-.26, tile.height + .74, -.16);
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(.32, .42), new THREE.MeshStandardMaterial({ color: colors[faction] || 0x7a1711, roughness: 1, side: THREE.DoubleSide }));
+    banner.position.set(-.02, tile.height + 1.0, -.16);
+    banner.rotation.y = .15;
+    mesh.add(bannerPole, banner);
+  }
+  mesh.position.set(tile.pos.x, 0, tile.pos.z);
+  return mesh;
+}
+
 function spawnEnemyCamps() {
   const farTiles = state.map.filter((t) => Math.hypot(t.pos.x, t.pos.z) > state.territoryRadius + 10 && t.type !== 'water');
   farTiles.sort(() => Math.random() - .5);
+  const factions = ['clans', 'iron', 'beasts'];
   state.enemyCamps = farTiles.slice(0, GAME_CONFIG.enemyCampCount).map((tile, i) => {
-    const mesh = new THREE.Group();
-    const matDark = new THREE.MeshStandardMaterial({ color: 0x5a2118, roughness: 1 });
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(.76, .94, .42, 6), matDark);
-    base.position.y = tile.height + .2;
-    base.castShadow = true;
-    const tent = new THREE.Mesh(new THREE.ConeGeometry(.54, 1.02, 4), new THREE.MeshStandardMaterial({ color: 0x3e1713, roughness: 1 }));
-    tent.position.y = tile.height + .82;
-    const fire = new THREE.Mesh(new THREE.OctahedronGeometry(.19), new THREE.MeshStandardMaterial({ color: 0xff9345, emissive: 0xff7836, emissiveIntensity: 1.1 }));
-    fire.position.y = tile.height + .48;
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(.12, 8, 8), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
-    skull.position.set(.24, tile.height + .58, .14);
-    const bannerPole = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, 1.3, 5), new THREE.MeshStandardMaterial({ color: 0x6d5330, roughness: 1 }));
-    bannerPole.position.set(-.26, tile.height + .74, -.16);
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(.32, .42), new THREE.MeshStandardMaterial({ color: 0x7a1711, roughness: 1, side: THREE.DoubleSide }));
-    banner.position.set(-.02, tile.height + 1.0, -.16);
-    banner.rotation.y = .15;
-    mesh.add(base, tent, fire, skull, bannerPole, banner);
-    mesh.position.set(tile.pos.x, 0, tile.pos.z);
+    const faction = factions[i % factions.length];
+    const mesh = makeCampMesh(tile, faction);
     sceneCtx.groups.enemyCamps.add(mesh);
-    return { id: `camp-${i}`, tileId: tile.id, hp: 120, pos: tile.pos.clone(), mesh };
+    return { id: `camp-${i}`, tileId: tile.id, hp: 120 + (faction === 'iron' ? 30 : 0), pos: tile.pos.clone(), mesh, faction };
   });
 }
 
@@ -168,11 +186,46 @@ async function tryPlaceBuilding(tile, forcedType = null) {
   return job;
 }
 
+function openTappedBuildingMenu(tile, building) {
+  openBuildingMenu(state, building, tile, {
+    upgrade: () => {
+      const job = startUpgrade(state, building);
+      if (!job) return notify('Не хватает ресурсов или уже идёт улучшение');
+      notify(`Начато улучшение: ${BUILDINGS[building.type].name}`);
+      updateHud(state);
+      openTappedBuildingMenu(tile, building);
+    },
+    train: () => {
+      openTrainMenu(state, () => {});
+      bindTrainButtons();
+    },
+    repair: () => {
+      const ok = repairBuilding(state, building);
+      notify(ok ? 'Постройка укреплена' : 'Недостаточно ресурсов на ремонт');
+      updateHud(state);
+      openTappedBuildingMenu(tile, building);
+    },
+    demolish: () => {
+      destroyBuilding(sceneCtx, state, building);
+      spawnCollapse(sceneCtx, tile.pos.clone().add(new THREE.Vector3(0, tile.height + .5, 0)));
+      notify(`Постройка снесена: ${BUILDINGS[building.type].name}`);
+      closeDrawer();
+      updateHud(state);
+      updateSelection(state);
+      renderRoads(sceneCtx, state);
+    },
+  });
+}
+
 function onTileSelected(tile) {
   state.selected = { kind: 'tile', ref: tile };
   highlightSelection();
+  const building = getBuildingOnTile(state, tile);
   if (state.selectedBuildType) {
     tryPlaceBuilding(tile);
+  } else if (building) {
+    openTappedBuildingMenu(tile, building);
+    updateSelection(state);
   } else {
     updateSelection(state);
   }
@@ -183,11 +236,8 @@ function onTileDoubleSelected(tile) {
   highlightSelection();
   const building = getBuildingOnTile(state, tile);
   if (building) {
+    openTappedBuildingMenu(tile, building);
     updateSelection(state);
-    if (['capital', 'barracks'].includes(building.type)) {
-      openTrainMenu(state, () => {});
-      bindTrainButtons();
-    }
     return;
   }
   if (!isTileInsideTerritory(state, tile) || tile.type === 'water') {
@@ -273,19 +323,16 @@ function bindTrainButtons() {
     btn.onclick = () => {
       const building = getBuildingById(state, btn.dataset.trainBuilding);
       const unitType = btn.dataset.unitType;
-      const unitCost = Object.entries(BUILDINGS[building.type].train || []).length ? null : null;
       if (!building || !unitType) return;
-      import('./config.js').then(({ UNITS }) => {
-        const unit = UNITS[unitType];
-        const ok = Object.entries(unit.cost).every(([k, v]) => (state.resources[k] || 0) >= v);
-        if (!ok) return notify('Недостаточно ресурсов на обучение');
-        Object.entries(unit.cost).forEach(([k, v]) => state.resources[k] -= v);
-        queueTraining(building, unitType);
-        notify(`В очереди: ${unit.name}`);
-        updateHud(state);
-        openTrainMenu(state, () => {});
-        bindTrainButtons();
-      });
+      const unit = UNITS[unitType];
+      const ok = Object.entries(unit.cost).every(([k, v]) => (state.resources[k] || 0) >= v);
+      if (!ok) return notify('Недостаточно ресурсов на обучение');
+      Object.entries(unit.cost).forEach(([k, v]) => state.resources[k] -= v);
+      queueTraining(building, unitType);
+      notify(`В очереди: ${unit.name}`);
+      updateHud(state);
+      openTrainMenu(state, () => {});
+      bindTrainButtons();
     };
   });
 }
@@ -296,9 +343,9 @@ function showRules() {
     'Веб-RTS с живым временем и двойным тапом по сотам',
     `
       <p><strong>Главная идея:</strong> ресурсы, строительство, обучение войск, враги, день и погода обновляются непрерывно. Кнопка хода заменена скоростью симуляции.</p>
-      <p><strong>Управление:</strong> один тап выбирает соту, юнита или здание. <strong>Двойной тап по пустой соте</strong> мгновенно ставит последнюю выбранную постройку, а если она не подходит — открывает быстрое меню.</p>
-      <p><strong>Смысл партии:</strong> расширяй границы, удерживай еду и порядок, развивай логистику дорог, обучай войска и переживай всё более сложные набеги. Цель — провести державу от основания к золотому веку.</p>
-      <p><strong>Механики:</strong> фермы любят реки и плодородную землю, шахты — скалы и холмы, рынки усиливаются дорогами, храмы и академии двигают престиж и знание.</p>
+      <p><strong>Управление:</strong> один тап выбирает соту, юнита или здание. <strong>Тап по зданию</strong> открывает его полноценное меню с улучшением, ремонтом и обучением. <strong>Двойной тап по пустой соте</strong> мгновенно ставит последнюю выбранную постройку, а если она не подходит — открывает быстрое меню.</p>
+      <p><strong>Смысл партии:</strong> расширяй границы, удерживай еду и порядок, развивай логистику дорог, обучай войска и переживай всё более сложные набеги разных фракций. Цель — провести державу от основания к золотому веку.</p>
+      <p><strong>Фракции врагов:</strong> степные кланы давят числом, железные мятежники несут тяжёлых крушителей, звериные всадники ударяют быстро.</p>
       <p><strong>Веб-подход:</strong> проект работает без сборщика, на обычном статическом хостинге вроде GitHub Pages. Сохранение идёт в localStorage.</p>
     `,
     [
@@ -345,7 +392,7 @@ async function processFinishedConstruction() {
   for (const job of done) {
     const entity = await finishConstruction(sceneCtx, state, job);
     if (entity) {
-      notify(`Построено: ${BUILDINGS[job.type].name}`);
+      notify(job.mode === 'upgrade' ? `Улучшено: ${BUILDINGS[entity.type].name} ур. ${entity.level}` : `Построено: ${BUILDINGS[job.type].name}`);
       const tile = state.mapIndex.get(job.tileId);
       connectRoadsForTile(tile);
     }
@@ -374,6 +421,15 @@ function updateDayNightVisual(dt) {
     cloud.position.x += Math.sin((state.worldTime * .03) + i) * dt * .1;
     cloud.position.z += Math.cos((state.worldTime * .02) + i) * dt * .08;
   });
+  state.buildings.forEach((b) => {
+    if (b.glow) b.glow.intensity = (b.type === 'capital' || b.type === 'temple' || b.type === 'tower' ? 0.8 : 0.45) + b.hitFlash * 1.5;
+    if (b.hitFlash) {
+      b.hitFlash = Math.max(0, b.hitFlash - dt * 3.5);
+      b.mesh.scale.setScalar(1 + b.hitFlash * .08);
+    } else {
+      b.mesh.scale.setScalar(1);
+    }
+  });
 }
 
 function maybeAutoSave(dt) {
@@ -386,12 +442,12 @@ function maybeAutoSave(dt) {
 function checkStateMilestones() {
   if (state.gameEnded) return;
   const capital = getCapital(state);
-  if (!capital || state.resources.stability <= 0) {
+  if (!capital || state.resources.stability <= 0 || capital.hp <= 0) {
     state.gameEnded = true;
     state.paused = true;
     state.timeScale = 0;
     setSpeedButton(0);
-    openModal('Держава пала', 'Власть рассыпалась', '<p>Нужно удерживать порядок, пищу и защиту. Попробуй начать снова и раньше строить амбары, храмы и башни.</p>', [{ label: 'Понятно', primary: true, onClick: closeModal }]);
+    openModal('Держава пала', 'Власть рассыпалась', '<p>Нужно удерживать порядок, пищу и защиту. Попробуй начать снова и раньше строить амбары, храмы, башни и улучшать столицу.</p>', [{ label: 'Понятно', primary: true, onClick: closeModal }]);
     return;
   }
   const allObjectives = state.objectives.every((o) => o.done);
