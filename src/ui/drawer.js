@@ -1,6 +1,7 @@
 import { BUILDINGS, TECHS, UNITS, TERRAIN_TYPES } from '../config.js';
 import { $, $$ } from './dom.js';
 import { beginResearch, canResearch } from '../systems/economy.js';
+import { computeBuildingYield, getBuildingStatus } from '../systems/buildings.js';
 
 export function closeDrawer() {
   $('#context-drawer').classList.add('hidden');
@@ -100,6 +101,42 @@ export function openResearchMenu(state, notify) {
       const ok = beginResearch(state, btn.dataset.techId);
       notify(ok ? 'Исследование начато' : 'Недостаточно знания или эпоха ещё не открыта');
     };
+  });
+}
+
+export function openBuildingMenu(state, building, tile, handlers) {
+  const status = getBuildingStatus(state, building);
+  const yields = computeBuildingYield(state, building);
+  const queue = building.trainQueue?.length ? `<div class="list-item"><strong>Очередь обучения:</strong> ${building.trainQueue.map((x) => UNITS[x.type]?.name || x.type).join(', ')}</div>` : '';
+  const currentJob = state.construction.find((job) => job.buildingId === building.id);
+  const actions = [];
+  if (status.canUpgrade) {
+    actions.push(`<button class="card-btn" data-building-action="upgrade"><strong>⬆️ Улучшить до ${building.level + 1}</strong><small>${costText(status.upgradeCost)} • ${status.upgradeTime}с</small><small>Доход и прочность вырастут</small></button>`);
+  }
+  if (currentJob?.mode === 'upgrade') {
+    actions.push(`<div class="list-item"><strong>Улучшение в процессе</strong><div class="progress"><div style="width:${Math.round(currentJob.progress / currentJob.buildTime * 100)}%"></div></div></div>`);
+  }
+  if ((BUILDINGS[building.type].train || []).length) {
+    actions.push(`<button class="card-btn" data-building-action="train"><strong>⚔️ Обучать войска</strong><small>Открыть локальную очередь здания</small></button>`);
+  }
+  if (status.repairNeeded) {
+    actions.push(`<button class="card-btn" data-building-action="repair"><strong>🛠️ Починить</strong><small>Вернуть часть прочности</small></button>`);
+  }
+  if (building.type !== 'capital') {
+    actions.push(`<button class="card-btn danger-card" data-building-action="demolish"><strong>💥 Снести</strong><small>Вернётся часть дерева и камня</small></button>`);
+  }
+
+  openDrawer(
+    `${status.cfg.icon} ${status.cfg.name} • ур. ${building.level}`,
+    `${TERRAIN_TYPES[tile.type].name} • HP ${Math.round(building.hp)} / ${Math.round(building.maxHp)}`,
+    `
+      <div class="list-item"><strong>Доход / эффект в секунду</strong><br>${Object.entries(yields).map(([k, v]) => `${k}: ${Math.round(v * 100) / 100}`).join(' • ') || 'Нет прямого дохода'}</div>
+      ${queue}
+      <div class="card-grid">${actions.join('')}</div>
+    `
+  );
+  $$('[data-building-action]').forEach((btn) => {
+    btn.onclick = () => handlers[btn.dataset.buildingAction]?.();
   });
 }
 
