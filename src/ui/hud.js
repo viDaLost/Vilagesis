@@ -2,9 +2,11 @@ import { RESOURCE_META, ERA_DATA, WEATHER_TYPES } from '../config.js';
 import { $, $$ } from './dom.js';
 import { fmt } from '../utils/helpers.js';
 
+const PRIMARY_RESOURCES = new Set(['gold', 'food', 'wood', 'stone', 'population', 'workers', 'army', 'prestige']);
+
 export function setupHud() {
   const top = $('#top-bar');
-  top.innerHTML = RESOURCE_META.map(([key, icon, label]) => `
+  top.innerHTML = RESOURCE_META.filter(([key]) => PRIMARY_RESOURCES.has(key)).map(([key, icon, label]) => `
     <div class="res-card">
       <div class="res-icon">${icon}</div>
       <div class="res-meta">
@@ -29,7 +31,7 @@ export function updateHud(state) {
   $('#kingdom-badges').innerHTML = [
     `Эпоха: ${ERA_DATA[state.era].name}`,
     `Техи: ${state.techs.size}`,
-    `Волны: ${state.stats.raidsDefeated}`,
+    `Лагеря: ${state.enemyCamps.length}`,
   ].map((t) => `<span class="badge">${t}</span>`).join('');
 
   $('#objectives-list').innerHTML = state.objectives.map((o) => {
@@ -44,11 +46,13 @@ export function updateHud(state) {
 }
 
 function kingdomText(state) {
-  if (state.resources.stability < 35) return 'Народ на грани смуты. Укрепляй порядок и пищу.';
-  if (state.resources.threat > 45) return 'На рубежах тревожно. Строй башни, нанимай войска.';
+  if (state.gameEnded) return 'Партия завершена. Можно продолжать смотреть на мир или начать заново.';
+  if (state.resources.stability < 35) return 'Народ на грани смуты. Нужны пища, храм или амбар.';
+  if (state.resources.food < state.resources.population * 2.5) return 'Запасы пищи тают. Усиль фермы и амбары.';
+  if (state.resources.threat > 45) return 'Рубежи тревожны. Башни и войска нужны уже сейчас.';
   if (state.era === 2) return 'Империя вступила в зрелый золотой век.';
   if (state.techProgress) return `Учёные работают: ${state.techProgress.id}`;
-  return 'Ресурсы, строительство и враги обновляются в реальном времени.';
+  return 'Двойной тап по свободной соте открывает быструю постройку.';
 }
 
 function toClock(dayTime) {

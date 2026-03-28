@@ -1,8 +1,6 @@
-import { BUILDINGS, TECHS, UNITS } from '../config.js';
+import { BUILDINGS, TECHS, UNITS, TERRAIN_TYPES } from '../config.js';
 import { $, $$ } from './dom.js';
-import { canPlaceBuilding, hasCost } from '../systems/buildings.js';
 import { beginResearch, canResearch } from '../systems/economy.js';
-import { queueTraining } from '../systems/units.js';
 
 export function closeDrawer() {
   $('#context-drawer').classList.add('hidden');
@@ -21,18 +19,43 @@ export function bindDrawerClose() {
 
 export function openBuildMenu(state, onChoose) {
   const cards = Object.entries(BUILDINGS)
-    .filter(([key, cfg]) => key !== 'capital')
+    .filter(([key]) => key !== 'capital')
     .map(([key, cfg]) => {
       const enabled = state.era >= (cfg.minEra ?? 0);
       return `<button class="card-btn" data-build-type="${key}" ${enabled ? '' : 'disabled'}>
         <strong>${cfg.icon} ${cfg.name}</strong>
         <small>${costText(cfg.cost)} • ${cfg.baseBuildTime}с</small>
-        <small>${cfg.category}</small>
+        <small>${categoryLabel(cfg.category)}</small>
       </button>`;
     }).join('');
-  openDrawer('Строительство', 'Выбери тип, затем коснись клетки', `<div class="card-grid">${cards}</div>`);
+  openDrawer('Строительство', 'Выбери тип, затем коснись клетки — или дважды тапни по соте для быстрого строительства', `<div class="card-grid">${cards}</div>`);
   $$('[data-build-type]').forEach((btn) => {
     btn.onclick = () => onChoose(btn.dataset.buildType);
+  });
+}
+
+export function openQuickBuildMenu(state, tile, onChoose) {
+  const candidates = Object.entries(BUILDINGS)
+    .filter(([key, cfg]) => key !== 'capital' && (!cfg.minEra || state.era >= cfg.minEra))
+    .filter(([, cfg]) => !cfg.terrain || cfg.terrain.includes(tile.type))
+    .sort((a, b) => scoreCandidate(a[0], tile.type) - scoreCandidate(b[0], tile.type))
+    .slice(0, 4);
+
+  const cards = candidates.map(([key, cfg]) => `
+    <button class="card-btn" data-quick-build="${key}">
+      <strong>${cfg.icon} ${cfg.name}</strong>
+      <small>${costText(cfg.cost)} • ${cfg.baseBuildTime}с</small>
+      <small>${quickHint(key, tile.type)}</small>
+    </button>`).join('');
+
+  openDrawer(
+    `Быстрая постройка`,
+    `${TERRAIN_TYPES[tile.type].name} • двойной тап может строить мгновенно последнюю постройку`,
+    cards || '<div class="list-item">Для этой клетки пока нет доступных построек.</div>'
+  );
+
+  $$('[data-quick-build]').forEach((btn) => {
+    btn.onclick = () => onChoose(btn.dataset.quickBuild);
   });
 }
 
@@ -82,4 +105,32 @@ export function openResearchMenu(state, notify) {
 
 function costText(cost = {}) {
   return Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(', ');
+}
+
+function categoryLabel(key) {
+  return ({ economy: 'Экономика', military: 'Оборона', culture: 'Культура', core: 'Центр' })[key] || key;
+}
+
+function scoreCandidate(type, terrain) {
+  const preferred = {
+    fertile: ['farm', 'granary', 'market'],
+    river: ['farm', 'harbor', 'market'],
+    forest: ['lumber', 'tower', 'wall'],
+    hill: ['mine', 'tower', 'barracks'],
+    rock: ['mine', 'temple', 'tower'],
+    sacred: ['temple', 'academy', 'wonder'],
+    grass: ['farm', 'market', 'barracks']
+  };
+  const list = preferred[terrain] || [];
+  const idx = list.indexOf(type);
+  return idx === -1 ? 99 : idx;
+}
+
+function quickHint(type, terrain) {
+  if (type === 'farm' && (terrain === 'river' || terrain === 'fertile')) return 'Лучший урожай на этой земле';
+  if (type === 'lumber' && terrain === 'forest') return 'Лес рядом ускоряет добычу';
+  if (type === 'mine' && (terrain === 'hill' || terrain === 'rock')) return 'Хорошее место для руды и камня';
+  if (type === 'temple' && terrain === 'sacred') return 'Священная зона усиливает престиж';
+  if (type === 'harbor' && terrain === 'river') return 'Торговля у воды особенно сильна';
+  return 'Подходит для текущей зоны';
 }
