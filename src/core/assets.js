@@ -111,9 +111,31 @@ export async function attachUnitModel(group, mapping) {
   if (!mapping?.file) return null;
   try {
     const { scene, animations } = await loadUnitModel(mapping.file);
-    scene.scale.setScalar(mapping.scale || 1);
-    scene.position.y = mapping.y || 0;
+
+    const bounds = new THREE.Box3().setFromObject(scene);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    bounds.getSize(size);
+    bounds.getCenter(center);
+
+    const height = Math.max(size.y || 0, 0.001);
+    const targetHeight = mapping.targetHeight || height;
+    const scalar = mapping.scale || (targetHeight / height);
+
+    scene.scale.setScalar(scalar);
+
+    // Повторно считаем bbox после масштабирования, чтобы корректно посадить модель на землю.
+    const scaledBounds = new THREE.Box3().setFromObject(scene);
+    const scaledCenter = new THREE.Vector3();
+    scaledBounds.getCenter(scaledCenter);
+
+    scene.position.set(
+      (mapping.x || 0) - scaledCenter.x,
+      (mapping.y || 0) - scaledBounds.min.y,
+      (mapping.z || 0) - scaledCenter.z,
+    );
     scene.rotation.y = mapping.rotY || 0;
+
     scene.traverse((obj) => {
       if (obj.isMesh || obj.isSkinnedMesh) {
         obj.castShadow = true;
