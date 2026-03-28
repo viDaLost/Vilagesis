@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { AnimationMixer, LoopOnce } from 'three';
 import { UNITS, UNIT_MODEL_MAP, UNIT_VISUALS } from '../config.js';
-import { loadUnitModel } from '../core/assets.js';
 import { getCapital, buildingCenter } from './buildings.js';
 import { dist2 } from '../utils/helpers.js';
 import { spawnCollapse } from './combat.js';
@@ -143,24 +142,8 @@ function makeUnitMesh(type) {
   group.add(fallbackBase);
 
   const mapping = UNIT_MODEL_MAP[type];
-  if (mapping?.file) {
-    loadUnitModel(mapping.file).then(({ scene, animations }) => {
-      scene.scale.setScalar(mapping.scale || 0.8);
-      scene.rotation.y = mapping.rotY || Math.PI;
-      scene.position.y = mapping.y ?? -0.42;
-      scene.traverse((obj) => {
-        if (obj.isMesh) {
-          obj.castShadow = true;
-          obj.receiveShadow = true;
-        }
-      });
-      group.add(scene);
-      group.userData.gltf = scene;
-      fallbackBase.visible = false;
-      silhouette.visible = false;
-      setupMixer(group, scene, animations, type);
-    }).catch(() => {});
-  }
+  void mapping;
+
 
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(type === 'brute' ? .42 : .34, type === 'brute' ? .56 : .46, 24),
