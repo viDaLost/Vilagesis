@@ -140,21 +140,23 @@ export function destroyBuilding(sceneCtx, state, building) {
   return true;
 }
 
-async function spawnFarmBeds(sceneCtx, tile, entity) {
+function spawnFarmBeds(sceneCtx, tile, entity) {
   const beds = [];
-  try {
-    for (let i = 0; i < 3; i++) {
-      const model = await loadDecorModel('crops.glb');
-      const angle = (i / 3) * Math.PI * 2 + Math.PI / 6;
-      const radius = 0.7;
-      model.scale.setScalar(0.42);
-      model.rotation.y = angle + Math.PI / 2;
-      model.position.set(tile.pos.x + Math.cos(angle) * radius, tile.height + 0.03, tile.pos.z + Math.sin(angle) * radius);
-      sceneCtx.groups.decor.add(model);
-      beds.push(model);
-    }
-  } catch {}
   entity.extraMeshes = beds;
+  (async () => {
+    try {
+      for (let i = 0; i < 3; i++) {
+        const model = await loadDecorModel('crops.glb');
+        const angle = (i / 3) * Math.PI * 2 + Math.PI / 6;
+        const radius = 0.7;
+        model.scale.setScalar(0.42);
+        model.rotation.y = angle + Math.PI / 2;
+        model.position.set(tile.pos.x + Math.cos(angle) * radius, tile.height + 0.03, tile.pos.z + Math.sin(angle) * radius);
+        sceneCtx.groups.decor.add(model);
+        beds.push(model);
+      }
+    } catch {}
+  })();
 }
 
 export async function createGhostBuildingMesh(type) {
@@ -220,16 +222,20 @@ export async function finishConstruction(sceneCtx, state, job) {
     extraMeshes: []
   };
 
-  let model;
-  try {
-    model = await loadBuildingModel(cfg.model);
-  } catch {
-    model = makeFallbackMesh();
-  }
-  model.scale.setScalar(scaleForBuilding(job.type, 1));
-  model.position.y = tile.height + .08;
-  entity.mesh.add(model);
-  entity.modelRoot = model;
+  const placeholder = makeFallbackMesh(job.type === 'capital' ? 0xc9a45b : 0xa8844d);
+  placeholder.scale.setScalar(scaleForBuilding(job.type, 1));
+  placeholder.position.y = tile.height + .08;
+  entity.mesh.add(placeholder);
+  entity.modelRoot = placeholder;
+
+  loadBuildingModel(cfg.model).then((model) => {
+    if (!entity.mesh || !entity.modelRoot) return;
+    entity.mesh.remove(entity.modelRoot);
+    entity.modelRoot = model;
+    model.scale.setScalar(scaleForBuilding(job.type, entity.level || 1));
+    model.position.y = tile.height + .08;
+    entity.mesh.add(model);
+  }).catch(() => {});
 
   const ring = selectionRing();
   ring.position.y = tile.height + .05;
@@ -249,7 +255,7 @@ export async function finishConstruction(sceneCtx, state, job) {
 
   if (cfg.territory) state.territoryRadius += cfg.territory;
   if (job.type === 'wonder') state.stats.wonderBuilt = 1;
-  if (job.type === 'farm') await spawnFarmBeds(sceneCtx, tile, entity);
+  if (job.type === 'farm') spawnFarmBeds(sceneCtx, tile, entity);
   return entity;
 }
 
