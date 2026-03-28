@@ -4,6 +4,7 @@ import { UNITS, UNIT_MODEL_MAP, UNIT_VISUALS } from '../config.js';
 import { getCapital, buildingCenter } from './buildings.js';
 import { dist2 } from '../utils/helpers.js';
 import { spawnCollapse } from './combat.js';
+import { attachUnitModel } from '../core/assets.js';
 
 let unitId = 1;
 
@@ -142,8 +143,14 @@ function makeUnitMesh(type) {
   group.add(fallbackBase);
 
   const mapping = UNIT_MODEL_MAP[type];
-  void mapping;
-
+  if (mapping) {
+    attachUnitModel(group, mapping).then((loaded) => {
+      if (!loaded) return;
+      const { model, animations } = loaded;
+      if (group.userData.silhouette) group.userData.silhouette.visible = false;
+      setupMixer(group, model, animations, type);
+    }).catch(() => {});
+  }
 
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(type === 'brute' ? .42 : .34, type === 'brute' ? .56 : .46, 24),
