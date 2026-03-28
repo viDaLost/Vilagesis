@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BUILDINGS } from '../config.js';
 import { loadBuildingModel, makeFallbackMesh } from '../core/assets.js';
 import { getNeighbors, isTileInsideTerritory } from './world.js';
+import { clearDecorOnTile } from './renderWorld.js';
 import { dist2, clamp } from '../utils/helpers.js';
 
 let buildingId = 1;
@@ -18,9 +19,9 @@ function selectionRing() {
 
 function scaleForBuilding(type, level) {
   const base = {
-    capital: 1.0, farm: .82, lumber: .82, mine: .85, market: .84,
-    granary: .82, temple: .86, barracks: .88, wall: .78, tower: .8,
-    academy: .85, harbor: .88, wonder: 1.0
+    capital: 1.52, farm: .82, lumber: .82, mine: .85, market: .84,
+    granary: .82, temple: .9, barracks: .9, wall: .82, tower: .85,
+    academy: .88, harbor: .9, wonder: 1.04
   };
   return (base[type] || .85) * (1 + (level - 1) * .07);
 }
@@ -158,6 +159,8 @@ export async function finishConstruction(sceneCtx, state, job) {
   const tile = state.mapIndex.get(job.tileId);
   if (!cfg || !tile) return null;
 
+  clearDecorOnTile(sceneCtx, tile);
+
   const entity = {
     id: `b-${buildingId++}`,
     type: job.type,
@@ -189,7 +192,7 @@ export async function finishConstruction(sceneCtx, state, job) {
   entity.mesh.add(ring);
   entity.selection = ring;
 
-  const light = new THREE.PointLight(0xffcc88, 0.75, 6);
+  const light = new THREE.PointLight(0xffcc88, job.type === 'capital' ? 1.1 : 0.78, job.type === 'capital' ? 8 : 6);
   light.position.set(0, tile.height + 1.8, 0);
   entity.mesh.add(light);
   entity.glow = light;
@@ -260,32 +263,17 @@ export function getCapital(state) {
 
 export function buildingCenter(state, building) {
   const tile = state.mapIndex.get(building.tileId);
-  return new THREE.Vector3(tile.pos.x, tile.height + .1, tile.pos.z);
-}
-
-export function nearestDefense(state, targetPos, radius = 7) {
-  let best = null;
-  let bestD = Infinity;
-  state.buildings.forEach((b) => {
-    if (!['tower', 'barracks', 'capital', 'wall'].includes(b.type)) return;
-    const pos = buildingCenter(state, b);
-    const d = dist2(pos, targetPos);
-    if (d < bestD && d <= radius) {
-      bestD = d;
-      best = b;
-    }
-  });
-  return best;
+  return tile.pos.clone().setY(tile.height + .6);
 }
 
 export function getBuildingStatus(state, building) {
   const cfg = BUILDINGS[building.type];
-  const nextLevel = building.level + 1;
+  const canUpgrade = canUpgradeBuilding(state, building);
   return {
     cfg,
-    canUpgrade: building.level < (cfg.maxLevel || 1) && !state.construction.some((job) => job.buildingId === building.id),
-    upgradeCost: nextLevel <= (cfg.maxLevel || 1) ? getUpgradeCost(building.type, nextLevel) : null,
-    upgradeTime: nextLevel <= (cfg.maxLevel || 1) ? getUpgradeTime(building.type, nextLevel) : null,
-    repairNeeded: building.hp < building.maxHp,
+    canUpgrade,
+    upgradeCost: getUpgradeCost(building.type, building.level + 1),
+    upgradeTime: getUpgradeTime(building.type, building.level + 1),
+    repairNeeded: building.hp < building.maxHp * .96,
   };
 }
