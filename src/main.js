@@ -3,7 +3,7 @@ import { GAME_CONFIG, BUILDINGS, UNITS } from './config.js';
 import { createInitialState } from './state.js';
 import { createScene } from './core/scene.js';
 import { generateWorld, getNeighbors, isTileInsideTerritory } from './systems/world.js';
-import { renderTiles, renderRoads } from './systems/renderWorld.js';
+import { renderTiles, renderRoads, clearDecorOnTile } from './systems/renderWorld.js';
 import { setupHud, updateHud } from './ui/hud.js';
 import { drawMinimap } from './ui/minimap.js';
 import { notify } from './ui/notifications.js';
@@ -18,12 +18,13 @@ import { updateDefense, updateProjectiles, spawnCollapse } from './systems/comba
 import { maybeChangeWeather, updateEnemyWaves, updateEnvironmentState } from './systems/events.js';
 import { saveGame, clearSave } from './systems/persistence.js';
 import { $, $$ } from './ui/dom.js';
-import { clamp, rand } from './utils/helpers.js';
+import { clamp } from './utils/helpers.js';
 
 const state = createInitialState();
 const sceneCtx = createScene(document.getElementById('game'));
 let ghostMesh = null;
 let lastTime = performance.now();
+let constructionDustTimer = 0;
 
 function setLoading(percent, text) {
   $('#loading-fill').style.width = `${percent}%`;
@@ -58,6 +59,7 @@ async function bootstrap() {
     onTile: onTileSelected,
     onTileDouble: onTileDoubleSelected,
     onUnit: onUnitSelected,
+    onEmpty: () => { state.selected = null; updateSelection(state); }
   });
 
   setLoading(100, 'Готово');
@@ -72,6 +74,7 @@ async function bootstrap() {
   addEventListener('resize', () => {
     sceneCtx.resize();
     drawMinimap(state);
+    refreshConstructionOverlays();
   });
 }
 
@@ -85,10 +88,25 @@ async function spawnCapital() {
   state.resources.workers = 4;
   capital.level = 1;
 
+  const neighbors = getNeighbors(state, center).filter((t) => t.type !== 'water');
+  for (const tile of neighbors) {
+    if (!canPlaceBuilding(state, 'wall', tile)) continue;
+    const build = placeConstruction(state, 'wall', tile);
+    build.progress = build.buildTime;
+  }
+
+  const outerRing = [];
+  neighbors.forEach((n) => {
+    getNeighbors(state, n).forEach((candidate) => {
+      if (!candidate || candidate.id === center.id || candidate.buildingId || candidate.type === 'water') return;
+      if (!outerRing.some((x) => x.id === candidate.id)) outerRing.push(candidate);
+    });
+  });
+
   const starter = [
-    ['farm', getNeighbors(state, center).find((t) => ['grass', 'fertile', 'river'].includes(t.type) && !t.buildingId)],
-    ['lumber', getNeighbors(state, center).find((t) => ['forest', 'grass'].includes(t.type) && !t.buildingId)],
-    ['mine', getNeighbors(state, center).find((t) => ['hill', 'rock'].includes(t.type) && !t.buildingId)],
+    ['farm', outerRing.find((t) => ['grass', 'fertile', 'river'].includes(t.type) && !t.buildingId)],
+    ['lumber', outerRing.find((t) => ['forest', 'grass'].includes(t.type) && !t.buildingId)],
+    ['mine', outerRing.find((t) => ['hill', 'rock'].includes(t.type) && !t.buildingId)],
   ];
   for (const [type, tile] of starter) {
     if (!tile) continue;
@@ -96,7 +114,7 @@ async function spawnCapital() {
     build.progress = build.buildTime;
   }
   const completed = collectFinishedConstruction(state);
-  for (const job of completed) await finishConstruction(sceneCtx, state, job);
+  for (const done of completed) await finishConstruction(sceneCtx, state, done);
 }
 
 function createRoadNetworkFromCapital() {
@@ -175,6 +193,7 @@ async function tryPlaceBuilding(tile, forcedType = null) {
     return;
   }
   payCost(state.resources, cfg.cost);
+  clearDecorOnTile(sceneCtx, tile);
   const job = placeConstruction(state, type, tile);
   state.lastQuickBuildType = type;
   notify(`Начато строительство: ${cfg.name}`);
@@ -183,6 +202,7 @@ async function tryPlaceBuilding(tile, forcedType = null) {
   removeGhost();
   updateHud(state);
   updateSelection(state);
+  refreshConstructionOverlays();
   return job;
 }
 
@@ -194,6 +214,7 @@ function openTappedBuildingMenu(tile, building) {
       notify(`Начато улучшение: ${BUILDINGS[building.type].name}`);
       updateHud(state);
       openTappedBuildingMenu(tile, building);
+      refreshConstructionOverlays();
     },
     train: () => {
       openTrainMenu(state, () => {});
@@ -297,7 +318,8 @@ function handleAction(action) {
     if (!capital) return;
     const tile = state.mapIndex.get(capital.tileId);
     sceneCtx.controls.target.set(tile.pos.x, tile.height, tile.pos.z);
-    sceneCtx.camera.position.set(tile.pos.x + 22, tile.height + 22, tile.pos.z + 18);
+    sceneCtx.camera.position.set(tile.pos.x + 18, tile.height + 19, tile.pos.z + 14);
+    closeDrawer();
   }
   if (action === 'build-menu') {
     openBuildMenu(state, (type) => {
@@ -343,10 +365,9 @@ function showRules() {
     'Веб-RTS с живым временем и двойным тапом по сотам',
     `
       <p><strong>Главная идея:</strong> ресурсы, строительство, обучение войск, враги, день и погода обновляются непрерывно. Кнопка хода заменена скоростью симуляции.</p>
-      <p><strong>Управление:</strong> один тап выбирает соту, юнита или здание. <strong>Тап по зданию</strong> открывает его полноценное меню с улучшением, ремонтом и обучением. <strong>Двойной тап по пустой соте</strong> мгновенно ставит последнюю выбранную постройку, а если она не подходит — открывает быстрое меню.</p>
+      <p><strong>Управление на телефоне:</strong> один тап выбирает соту, юнита или здание. <strong>Двойной тап по пустой соте</strong> ставит последнюю постройку либо открывает нижнюю панель быстрой стройки. Тап вне окна теперь закрывает окна.</p>
+      <p><strong>Подсказки стройки:</strong> над строящейся сотой появляется обратный отсчёт и пыль работ. Когда здание строится, декорации на этой соте убираются.</p>
       <p><strong>Смысл партии:</strong> расширяй границы, удерживай еду и порядок, развивай логистику дорог, обучай войска и переживай всё более сложные набеги разных фракций. Цель — провести державу от основания к золотому веку.</p>
-      <p><strong>Фракции врагов:</strong> степные кланы давят числом, железные мятежники несут тяжёлых крушителей, звериные всадники ударяют быстро.</p>
-      <p><strong>Веб-подход:</strong> проект работает без сборщика, на обычном статическом хостинге вроде GitHub Pages. Сохранение идёт в localStorage.</p>
     `,
     [
       { label: 'Начать', primary: true, onClick: closeModal },
@@ -357,8 +378,8 @@ function showRules() {
 
 function showGhost(type) {
   removeGhost();
-  const geo = new THREE.CylinderGeometry(1.36, 1.36, .18, 6);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xffd66b, transparent: true, opacity: .32 });
+  const geo = new THREE.CylinderGeometry(1.28, 1.28, .16, 6);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffd66b, transparent: true, opacity: .28 });
   ghostMesh = new THREE.Mesh(geo, mat);
   ghostMesh.rotation.y = Math.PI / 6;
   sceneCtx.groups.ghosts.add(ghostMesh);
@@ -367,8 +388,9 @@ function showGhost(type) {
 
 function pointerGhostMove(e) {
   if (!ghostMesh) return;
+  const rect = sceneCtx.renderer.domElement.getBoundingClientRect();
   const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  const pointer = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, sceneCtx.camera);
   const hits = raycaster.intersectObjects(sceneCtx.groups.tiles.children, false);
   if (!hits.length) return;
@@ -397,6 +419,7 @@ async function processFinishedConstruction() {
       connectRoadsForTile(tile);
     }
   }
+  if (done.length) refreshConstructionOverlays();
   renderRoads(sceneCtx, state);
 }
 
@@ -408,21 +431,22 @@ function connectRoadsForTile(tile) {
 function updateDayNightVisual(dt) {
   const t = (state.dayTime % GAME_CONFIG.dayDuration) / GAME_CONFIG.dayDuration;
   const ang = t * Math.PI * 2;
-  sceneCtx.sun.position.set(Math.cos(ang) * 42, Math.max(8, Math.sin(ang) * 34), Math.sin(ang) * 20 - 8);
-  const lightMul = { clear: 1, rain: .86, mist: .72, dust: .78 }[state.weather];
-  sceneCtx.sun.intensity = clamp(Math.sin(ang) * .9 + .65, .18, 1.24) * lightMul;
-  sceneCtx.hemi.intensity = .28 + sceneCtx.sun.intensity * .45;
+  sceneCtx.sun.position.set(Math.cos(ang) * 40, Math.max(8, Math.sin(ang) * 34), Math.sin(ang) * 20 - 8);
+  const lightMul = { clear: 1, rain: .92, mist: .8, dust: .84 }[state.weather];
+  sceneCtx.sun.intensity = clamp(Math.sin(ang) * 1.05 + .78, .24, 1.42) * lightMul;
+  sceneCtx.hemi.intensity = .36 + sceneCtx.sun.intensity * .46;
+  sceneCtx.ambient.intensity = .18 + sceneCtx.sun.intensity * .06;
   sceneCtx.stars.visible = sceneCtx.sun.position.y < 12;
-  sceneCtx.sky.material.uniforms.topColor.value.setHex(sceneCtx.sun.position.y > 14 ? 0x84c4ff : 0x182a56);
-  sceneCtx.sky.material.uniforms.bottomColor.value.setHex(sceneCtx.sun.position.y > 14 ? 0xf5d8a3 : 0x522d16);
-  sceneCtx.scene.fog.color.setHex(sceneCtx.sun.position.y > 14 ? 0x77583a : 0x101018);
+  sceneCtx.sky.material.uniforms.topColor.value.setHex(sceneCtx.sun.position.y > 14 ? 0x8ed0ff : 0x182a56);
+  sceneCtx.sky.material.uniforms.bottomColor.value.setHex(sceneCtx.sun.position.y > 14 ? 0xf6c684 : 0x522d16);
+  sceneCtx.scene.fog.color.setHex(sceneCtx.sun.position.y > 14 ? 0x6d5537 : 0x101018);
   sceneCtx.cloudLayer.children.forEach((cloud, i) => {
     cloud.rotation.y += dt * cloud.userData.drift * .1;
     cloud.position.x += Math.sin((state.worldTime * .03) + i) * dt * .1;
     cloud.position.z += Math.cos((state.worldTime * .02) + i) * dt * .08;
   });
   state.buildings.forEach((b) => {
-    if (b.glow) b.glow.intensity = (b.type === 'capital' || b.type === 'temple' || b.type === 'tower' ? 0.8 : 0.45) + b.hitFlash * 1.5;
+    if (b.glow) b.glow.intensity = (b.type === 'capital' || b.type === 'temple' || b.type === 'tower' ? 1.0 : 0.48) + b.hitFlash * 1.5;
     if (b.hitFlash) {
       b.hitFlash = Math.max(0, b.hitFlash - dt * 3.5);
       b.mesh.scale.setScalar(1 + b.hitFlash * .08);
@@ -457,6 +481,63 @@ function checkStateMilestones() {
   }
 }
 
+function refreshConstructionOverlays() {
+  const wrap = $('#construction-overlays');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  state.construction.forEach((job) => {
+    const tile = state.mapIndex.get(job.tileId);
+    if (!tile) return;
+    const el = document.createElement('div');
+    el.className = 'construction-timer';
+    el.dataset.jobId = job.id;
+    el.textContent = `${Math.max(0, Math.ceil(job.buildTime - job.progress))}с`;
+    wrap.appendChild(el);
+  });
+}
+
+function updateConstructionOverlays() {
+  const wrap = $('#construction-overlays');
+  if (!wrap) return;
+  if (wrap.children.length !== state.construction.length) refreshConstructionOverlays();
+  state.construction.forEach((job) => {
+    const tile = state.mapIndex.get(job.tileId);
+    const el = wrap.querySelector(`[data-job-id="${job.id}"]`);
+    if (!tile || !el) return;
+    const world = tile.pos.clone();
+    world.y = tile.height + 2.1;
+    world.project(sceneCtx.camera);
+    const x = (world.x * .5 + .5) * innerWidth;
+    const y = (world.y * -.5 + .5) * innerHeight;
+    const offscreen = world.z > 1 || x < -50 || x > innerWidth + 50 || y < -50 || y > innerHeight + 50;
+    el.style.display = offscreen ? 'none' : 'block';
+    el.style.transform = `translate(${x}px, ${y}px)`;
+    el.textContent = `${Math.max(0, Math.ceil(job.buildTime - job.progress))}с`;
+  });
+}
+
+function spawnConstructionDust(dt) {
+  constructionDustTimer += dt;
+  if (constructionDustTimer < 0.18) return;
+  constructionDustTimer = 0;
+  state.construction.forEach((job) => {
+    const tile = state.mapIndex.get(job.tileId);
+    if (!tile) return;
+    for (let i = 0; i < 2; i++) {
+      const dust = new THREE.Mesh(new THREE.SphereGeometry(.08 + Math.random() * .05, 5, 5), new THREE.MeshBasicMaterial({ color: 0xb79862, transparent: true, opacity: .42 }));
+      dust.position.set(tile.pos.x + (Math.random() - .5) * .9, tile.height + .38 + Math.random() * .35, tile.pos.z + (Math.random() - .5) * .9);
+      sceneCtx.groups.effects.add(dust);
+      sceneCtx.effectBursts.push({
+        id: `dust-${performance.now()}-${Math.random()}`,
+        mesh: dust,
+        vel: new THREE.Vector3((Math.random() - .5) * .3, .32 + Math.random() * .18, (Math.random() - .5) * .3),
+        life: .5 + Math.random() * .35,
+        kind: 'burst'
+      });
+    }
+  });
+}
+
 async function stepSimulation(dt) {
   updateEnvironmentState(state, dt);
   applyRealTimeEconomy(state, dt);
@@ -471,6 +552,7 @@ async function stepSimulation(dt) {
   updateProjectiles(sceneCtx, state, dt);
   updateEnemyWaves(sceneCtx, state, dt, notify);
   updateObjectives(state);
+  spawnConstructionDust(dt);
 
   state.workerSpawnTimer -= dt;
   if (state.workerSpawnTimer <= 0) {
@@ -499,6 +581,7 @@ async function animate(now = performance.now()) {
     drawMinimap(state);
   }
 
+  updateConstructionOverlays();
   updateDayNightVisual(rawDt * Math.max(state.timeScale, .3));
   sceneCtx.controls.update();
   sceneCtx.composer.render();
