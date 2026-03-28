@@ -186,6 +186,9 @@ export function spawnUnit(sceneCtx, state, type, pos, target = null) {
     hitFlash: 0,
     healthEl: null,
     dead: false,
+    workTimer: 0,
+    idleTimer: 0,
+    homeBuildingId: null,
   };
   entity.mesh.position.copy(entity.pos);
   entity.mesh.position.y += .8;
@@ -271,6 +274,27 @@ function cleanupDeadUnit(sceneCtx, state, unit, index) {
   if (!unit.hostile) state.stats.armyUnits = state.units.filter((u) => !u.hostile && u.type !== 'worker').length;
 }
 
+
+function buildingTargetsFor(unit, state) {
+  if (unit.hostile) return [];
+  const filtered = state.buildings.filter((b) => !['wall'].includes(b.type));
+  if (unit.type === 'worker') return filtered.filter((b) => ['capital','farm','lumber','mine','market','granary','academy','temple'].includes(b.type));
+  return filtered.filter((b) => ['capital','barracks','tower','temple'].includes(b.type));
+}
+
+function chooseNewBuildingTask(unit, state) {
+  const list = buildingTargetsFor(unit, state);
+  if (!list.length) return null;
+  const current = unit.homeBuildingId;
+  const pool = list.filter((b) => b.id !== current);
+  const targetBuilding = (pool.length ? pool : list)[Math.floor(Math.random() * (pool.length ? pool.length : list.length))];
+  unit.homeBuildingId = targetBuilding.id;
+  const center = buildingCenter(state, targetBuilding);
+  const angle = Math.random() * Math.PI * 2;
+  const radius = targetBuilding.type === 'capital' ? 1.8 : 1.05;
+  return new THREE.Vector3(center.x + Math.cos(angle) * radius, center.y, center.z + Math.sin(angle) * radius);
+}
+
 export function updateUnits(sceneCtx, state, dt, notify) {
   const capital = getCapital(state);
   const capitalTile = capital ? state.mapIndex.get(capital.tileId) : null;
@@ -311,8 +335,26 @@ export function updateUnits(sceneCtx, state, dt, notify) {
           playOneShot(unit.mesh, 'attack');
           if (enemy.hp <= 0) cleanupDeadUnit(sceneCtx, state, enemy, state.units.indexOf(enemy));
         }
-      } else if (capitalTile) {
-        targetPos = capitalTile.pos;
+      } else {
+        unit.idleTimer -= dt;
+        if (!unit.target || unit.idleTimer <= 0) {
+          unit.target = chooseNewBuildingTask(unit, state) || (capitalTile ? capitalTile.pos.clone() : null);
+          unit.idleTimer = 4 + Math.random() * 3;
+        }
+        targetPos = unit.target;
+      }
+    } else {
+      unit.workTimer -= dt;
+      if (unit.workTimer > 0) {
+        targetPos = null;
+      } else {
+        if (!unit.target || unit.pos.distanceTo(unit.target) < 0.45) {
+          unit.workTimer = 1.4 + Math.random() * 2.1;
+          unit.target = chooseNewBuildingTask(unit, state) || (capitalTile ? capitalTile.pos.clone() : null);
+          targetPos = null;
+        } else {
+          targetPos = unit.target;
+        }
       }
     }
 
@@ -323,7 +365,7 @@ export function updateUnits(sceneCtx, state, dt, notify) {
       if (len > .18) {
         dir.normalize();
         unit.pos.addScaledVector(dir, unit.speed * dt);
-        unit.mesh.rotation.y = Math.atan2(dir.x, dir.z) + (unit.mesh.userData.facingOffset || 0);
+        unit.mesh.rotation.y = Math.atan2(dir.x, dir.z) + (unit.mesh.userData.facingOffset || Math.PI);
         unit.stepPhase += dt * unit.speed * vis.bobSpeed;
         moved = true;
       }
@@ -343,7 +385,11 @@ export function updateUnits(sceneCtx, state, dt, notify) {
     if (unit.mesh.userData.mixer) {
       unit.mesh.userData.mixer.update(dt);
       if (!unit.attackFlash && !unit.hitFlash) {
-        setAnimationState(unit.mesh, moved ? 'walk' : 'idle');
+        if (unit.type === 'worker' && !moved && unit.workTimer > 0.2) {
+          setAnimationState(unit.mesh, 'idle');
+        } else {
+          setAnimationState(unit.mesh, moved ? 'walk' : 'idle');
+        }
       }
     }
 

@@ -3,7 +3,7 @@ import { TERRAIN_TYPES, DECOR_MODELS, GAME_CONFIG } from '../config.js';
 import { loadDecorModel, loadUnitModel } from '../core/assets.js';
 
 const terrainMaterials = new Map();
-const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0x8c6b43, roughness: 1, metalness: 0 });
+const edgeMaterial = null;
 const raycaster = new THREE.Raycaster();
 const down = new THREE.Vector3(0, -1, 0);
 
@@ -38,12 +38,12 @@ function makeOrganicShape(tile) {
 }
 
 function makeHexMesh(tile) {
-  const depth = tile.type === 'water' ? .18 : .38 + Math.max(0, tile.height * .02);
+  const depth = tile.type === 'water' ? .04 : .08 + Math.max(0, tile.height * .006);
   const shape = makeOrganicShape(tile);
-  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSize: .02, bevelThickness: .02, bevelSegments: 1 });
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
   geo.rotateX(-Math.PI / 2);
   geo.translate(tile.pos.x, tile.height - depth, tile.pos.z);
-  const mesh = new THREE.Mesh(geo, [edgeMaterial, getTerrainMaterial(tile.type)]);
+  const mesh = new THREE.Mesh(geo, getTerrainMaterial(tile.type));
   mesh.receiveShadow = true;
   mesh.userData.tileId = tile.id;
   mesh.rotation.y = tile.noise * .035;
@@ -192,6 +192,7 @@ async function spawnDecorModel(sceneCtx, tile, key, slot = 0) {
         obj.receiveShadow = true;
       }
     });
+    model.userData.baseY = y;
     sceneCtx.groups.decor.add(model);
     tile.decorMeshes.push(model);
   } catch (err) {
