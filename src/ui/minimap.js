@@ -31,16 +31,6 @@ export function drawMinimap(state) {
   ctx.arc(cx, cy, state.territoryRadius * scale, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = 'rgba(212,181,121,.8)';
-  state.roads.forEach((road) => {
-    const a = state.mapIndex.get(road.a);
-    const b = state.mapIndex.get(road.b);
-    if (!a || !b) return;
-    ctx.beginPath();
-    ctx.moveTo(cx + a.pos.x * scale, cy + a.pos.z * scale);
-    ctx.lineTo(cx + b.pos.x * scale, cy + b.pos.z * scale);
-    ctx.stroke();
-  });
 
   state.enemyCamps.forEach((camp) => {
     ctx.fillStyle = '#ff826d';

@@ -38,7 +38,7 @@ export function updateHud(state) {
   $('#objectives-list').innerHTML = state.objectives.map((o) => {
     let current = 0;
     if (o.metric === 'food') current = state.resources.food;
-    if (o.metric === 'defenseBuildings') current = state.buildings.filter((b) => ['wall','tower','barracks'].includes(b.type)).length;
+    if (o.metric === 'economyReady') current = state.buildings.filter((b) => ['farm','lumber','mine'].includes(b.type)).length;
     if (o.metric === 'armyUnits') current = state.stats.armyUnits;
     if (o.metric === 'wonderBuilt') current = state.stats.wonderBuilt;
     const pct = Math.min(100, Math.round(current / o.target * 100));
@@ -51,7 +51,8 @@ function kingdomText(state) {
   if (state.resources.stability < 35) return 'Народ на грани смуты. Укрепляй порядок и пищу.';
   if (state.resources.food < state.resources.population * 2.5) return 'Запасы пищи тают. Усиль фермы и амбары.';
   if (state.resources.threat > 45) return 'Рубежи тревожны. Башни и войска нужны уже сейчас.';
-  if (state.construction.length) return 'Над строящимися сотами теперь видно таймер и пыль работ.';
+  if (state.placementMode?.type === 'unit-command') return 'Выбери точку на карте, чтобы отдать приказ выбранным юнитам.';
+  if (state.construction.length) return 'Над строящимися сотами виден таймер стройки.';
   if (state.resources.knowledge < 12) return 'Знание теперь видно в верхней панели. Копи его для исследований.';
   if (state.era === 2) return 'Империя вступила в зрелый золотой век.';
   if (state.techProgress) return `Учёные работают: ${state.techProgress.id}`;
