@@ -10,7 +10,7 @@ export function updateSelection(state) {
   const sel = state.selected;
   if (!sel) {
     title.textContent = 'Выбор';
-    body.innerHTML = state.placementMode?.type === 'unit-command' ? 'Укажи точку на карте для выбранных юнитов.' : 'Коснись клетки, здания или юнита.';
+    body.innerHTML = state.placementMode?.type === 'unit-command' ? 'Нажми на карту, чтобы отправить юнита в выбранную точку.' : 'Коснись клетки, здания или юнита.';
     return;
   }
   if (sel.kind === 'tile') {
@@ -27,6 +27,6 @@ export function updateSelection(state) {
   if (sel.kind === 'unit') {
     const unit = sel.ref;
     title.textContent = UNITS[unit.type].name;
-    body.innerHTML = `<div>HP: <strong>${fmt(unit.hp)} / ${fmt(unit.maxHp)}</strong></div><div>Скорость: <strong>${fmt(unit.speed)}</strong></div><div>${unit.hostile ? 'Вражеский' : 'Свой'} юнит</div>${!unit.hostile ? '<div>После выбора коснись точки на карте для перемещения.</div>' : ''}`;
+    body.innerHTML = `<div>HP: <strong>${fmt(unit.hp)} / ${fmt(unit.maxHp)}</strong></div><div>Скорость: <strong>${fmt(unit.speed)}</strong></div><div>${unit.hostile ? 'Вражеский' : 'Свой'} юнит</div>${!unit.hostile ? '<div>Открой меню юнита: можно отправить в точку или назначить на работу.</div>' : ''}`;
   }
 }
