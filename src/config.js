@@ -1,5 +1,5 @@
 export const GAME_CONFIG = {
-  saveKey: 'empire-east-3d-rts-save-v24',
+  saveKey: 'empire-east-3d-rts-save-v30',
   mapRadius: 13,
   hexSize: 1.72,
   axialScaleX: 0.985,
@@ -8,20 +8,20 @@ export const GAME_CONFIG = {
   dayDuration: 320,
   seasonDuration: 960,
   autosaveEvery: 12,
-  workerSpawnEvery: 34,
-  enemyWaveEvery: 120,
+  workerSpawnEvery: 38,
+  enemyWaveEvery: 220,
   enemyCampCount: 5,
-  decorModelDensity: 0.44,
+  decorModelDensity: 0.58,
   maxPopulationSoft: 60,
   doubleTapMs: 340,
   decorPerTileSoftCap: 5,
   terrain: {
     waterLevel: -1.1,
-    riverBand: 0.08,
-    hillLevel: 0.8,
-    rockLevel: 1.25,
-    fertileBand: 0.38,
-    forestBand: -0.28
+    riverBand: 0.055,
+    hillLevel: 0.78,
+    rockLevel: 1.12,
+    fertileBand: 0.26,
+    forestBand: -0.18
   }
 };
 
@@ -70,7 +70,7 @@ export const BUILDINGS = {
     model: 'castle-fortress.glb', category: 'core',
     maxLevel: 5,
     baseBuildTime: 0,
-    yields: { gold: .7, prestige: .08, knowledge: .03, populationCap: 12 },
+    yields: { prestige: .08, knowledge: .03, populationCap: 12 },
     train: ['worker'],
     health: 380,
     territory: 3.4,
@@ -100,7 +100,7 @@ export const BUILDINGS = {
     name: 'Шахта', icon: '⛏️', model: 'mine.glb', category: 'economy',
     cost: { gold: 32, wood: 12 },
     baseBuildTime: 14,
-    yields: { stone: .62, gold: .16 },
+    yields: { stone: .72, gold: .12 },
     maxLevel: 3,
     health: 132,
     terrain: ['hill', 'rock'],

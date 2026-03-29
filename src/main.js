@@ -16,7 +16,6 @@ import { generateWorld, getNeighbors, isTileInsideTerritory } from './systems/wo
 import { getTerrainY } from './systems/terrain.js';
 import { renderTiles, renderRoads, clearDecorOnTile, populateDecorModels, updateTerritoryOverlay } from './systems/renderWorld.js';
 import { setupHud, updateHud } from './ui/hud.js';
-import { drawMinimap } from './ui/minimap.js';
 import { notify } from './ui/notifications.js';
 import { openBuildMenu, openQuickBuildMenu, openResearchMenu, openTrainMenu, bindDrawerClose, closeDrawer, openBuildingMenu } from './ui/drawer.js';
 import { setupModal, openModal, closeModal } from './ui/modal.js';
@@ -45,7 +44,6 @@ function emergencyRelease() {
   const ls = $('#loading-screen');
   if (ls) ls.style.display = 'none';
   state.timeScale = GAME_CONFIG.simBaseSpeed;
-  try { setSpeedButton(GAME_CONFIG.simBaseSpeed); } catch {}
   try { showRules(); } catch {}
   try { animate(); } catch {}
 }
@@ -63,7 +61,6 @@ async function bootstrap() {
     emergencyReleased = true;
     $('#loading-screen').style.display = 'none';
     state.timeScale = GAME_CONFIG.simBaseSpeed;
-    setSpeedButton(GAME_CONFIG.simBaseSpeed);
     showRules();
     animate();
   };
@@ -84,7 +81,6 @@ async function bootstrap() {
 
   setLoading(58, 'Подготовка интерфейса…');
   updateHud(state);
-  drawMinimap(state);
   updateSelection(state);
 
   setLoading(72, 'Подключение ввода…');
@@ -109,8 +105,7 @@ async function bootstrap() {
 
   addEventListener('resize', () => {
     sceneCtx.resize();
-    drawMinimap(state);
-    refreshConstructionOverlays();
+      refreshConstructionOverlays();
   });
 }
 
@@ -128,10 +123,10 @@ async function spawnCapital() {
   state.capitalId = capital.id;
   center.buildingId = capital.id;
   state.resources.population = 6;
-  state.resources.workers = 3;
+  state.resources.workers = 5;
   capital.level = 1;
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     const randomPos = new THREE.Vector3(center.pos.x + (Math.random() - 0.5) * 1.5, center.height, center.pos.z + (Math.random() - 0.5) * 1.5);
     spawnUnit(sceneCtx, state, 'worker', randomPos, null);
   }
@@ -163,10 +158,10 @@ async function spawnCapital() {
   }
   const completed = collectFinishedConstruction(state);
   for (const done of completed) await finishConstruction(sceneCtx, state, done);
-  state.resources.gold = 0;
-  state.resources.food = 0;
-  state.resources.wood = 0;
-  state.resources.stone = 0;
+  state.resources.gold = Math.max(state.resources.gold, 140);
+  state.resources.food = Math.max(state.resources.food, 120);
+  state.resources.wood = Math.max(state.resources.wood, 95);
+  state.resources.stone = Math.max(state.resources.stone, 70);
 }
 
 function createRoadNetworkFromCapital() {}
@@ -281,13 +276,14 @@ function onTileSelected(tile) {
   }
   if (state.placementMode?.type === 'unit-command') {
     state.selectedUnits.forEach((unit) => {
+      unit.manualTarget = tile.pos.clone();
       unit.commandTarget = tile.pos.clone();
       unit.patrolCenter = tile.pos.clone();
       unit.mode = 'move';
+      unit.forceJob = false;
     });
-    if (state.selectedUnits.length) notify('Отряд направлен в точку');
+    if (state.selectedUnits.length) notify('Юнит направлен в точку');
     state.placementMode = null;
-    state.selectedUnits = [];
     updateSelection(state);
     return;
   }
@@ -322,14 +318,14 @@ function onTileDoubleSelected(tile) {
   updateSelection(state);
 }
 
-function onUnitSelected(unit) {
+function onUnitSelected(unit, event = null) {
   state.selected = { kind: 'unit', ref: unit };
-  if (!unit.hostile) {
-    state.selectedUnits = [unit];
-    state.placementMode = { type: 'unit-command' };
-  } else {
-    state.selectedUnits = [];
+  state.selectedUnits = unit.hostile ? [] : [unit];
+  if (unit.hostile) {
     state.placementMode = null;
+  } else {
+    state.placementMode = null;
+    openUnitActionMenu(unit, event);
   }
   highlightSelection();
   updateSelection(state);
@@ -344,29 +340,68 @@ function highlightSelection() {
   }
 }
 
-function hookButtons() {
-  $$('.speed-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const speed = Number(btn.dataset.speed);
-      if (speed === 0) {
-        state.paused = true;
-        state.timeScale = 0;
-      } else {
-        state.paused = false;
-        state.timeScale = speed;
-      }
-      setSpeedButton(speed);
-    };
-  });
 
+function ensureUnitActionMenu() {
+  let menu = document.getElementById('unit-action-menu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.id = 'unit-action-menu';
+  menu.className = 'glass-panel';
+  menu.innerHTML = `
+    <div class="panel-title">Юнит</div>
+    <button class="card-btn" data-unit-action="move">Следовать на место</button>
+    <button class="card-btn" data-unit-action="work">Выполнять работу</button>
+  `;
+  document.getElementById('ui-root').appendChild(menu);
+  menu.querySelector('[data-unit-action="move"]').onclick = () => {
+    const unit = state.selected?.ref;
+    if (!unit || unit.hostile) return;
+    state.selectedUnits = [unit];
+    state.placementMode = { type: 'unit-command', unitId: unit.id };
+    notify('Нажми на карту, куда должен пойти юнит');
+    closeUnitActionMenu();
+    updateSelection(state);
+  };
+  menu.querySelector('[data-unit-action="work"]').onclick = () => {
+    const unit = state.selected?.ref;
+    if (!unit || unit.hostile) return;
+    unit.forceJob = true;
+    unit.manualTarget = null;
+    unit.commandTarget = null;
+    unit.patrolCenter = null;
+    unit.mode = 'work';
+    notify('Юнит ищет ближайшую свободную работу');
+    closeUnitActionMenu();
+  };
+  document.addEventListener('pointerdown', (e) => {
+    const node = document.getElementById('unit-action-menu');
+    if (!node || !node.classList.contains('visible')) return;
+    if (e.target.closest('#unit-action-menu')) return;
+    closeUnitActionMenu();
+  });
+  return menu;
+}
+
+function closeUnitActionMenu() {
+  const menu = document.getElementById('unit-action-menu');
+  if (menu) menu.classList.remove('visible');
+}
+
+function openUnitActionMenu(unit, event) {
+  const menu = ensureUnitActionMenu();
+  const x = event?.clientX ?? (window.innerWidth * 0.5);
+  const y = event?.clientY ?? (window.innerHeight * 0.56);
+  menu.style.left = `${Math.min(window.innerWidth - 240, Math.max(14, x - 30))}px`;
+  menu.style.top = `${Math.min(window.innerHeight - 170, Math.max(120, y - 20))}px`;
+  menu.classList.add('visible');
+}
+
+function hookButtons() {
   $$('[data-action]').forEach((btn) => {
     btn.onclick = () => handleAction(btn.dataset.action);
   });
 }
 
-function setSpeedButton(speed) {
-  $$('.speed-btn').forEach((btn) => btn.classList.toggle('active', Number(btn.dataset.speed) === speed));
-}
 
 function handleAction(action) {
   if (action === 'focus-capital') {
@@ -426,8 +461,8 @@ function showRules() {
     'Летопись правителя',
     'Веб-RTS с живым временем и двойным тапом по сотам',
     `
-      <p><strong>Главная идея:</strong> ресурсы, строительство, обучение войск, враги, день и погода обновляются непрерывно. Кнопка хода заменена скоростью симуляции.</p>
-      <p><strong>Управление на телефоне:</strong> один тап выбирает соту, юнита или здание. <strong>Двойной тап по пустой соте</strong> ставит последнюю постройку либо открывает нижнюю панель быстрой стройки. Тап вне окна теперь закрывает окна.</p>
+      <p><strong>Главная идея:</strong> ресурсы, строительство, обучение войск, враги, день и погода обновляются непрерывно. Игра течёт сама, без кнопок ускорения и паузы.</p>
+      <p><strong>Управление:</strong> один тап выбирает соту, юнита или здание. У юнита теперь есть меню действий: можно отправить его в точку или назначить на работу. <strong>Двойной тап по пустой соте</strong> ставит последнюю постройку либо открывает нижнюю панель быстрой стройки.</p>
       <p><strong>Подсказки стройки:</strong> над строящейся сотой появляется обратный отсчёт и пыль работ. Когда здание строится, декорации на этой соте убираются.</p>
       <p><strong>Смысл партии:</strong> расширяй границы, удерживай еду и порядок, обучай войска и переживай всё более сложные набеги разных фракций. Цель — провести державу от основания к золотому веку.</p>
     `,
@@ -561,7 +596,6 @@ function checkStateMilestones() {
     state.gameEnded = true;
     state.paused = true;
     state.timeScale = 0;
-    setSpeedButton(0);
     openModal('Держава пала', 'Власть рассыпалась', '<p>Нужно удерживать порядок, пищу и защиту. Попробуй начать снова и раньше строить амбары, храмы, башни и улучшать столицу.</p>', [{ label: 'Понятно', primary: true, onClick: closeModal }]);
     return;
   }
@@ -715,8 +749,7 @@ async function animate(now = performance.now()) {
     await stepSimulation(dt);
     updateSelection(state);
     updateHud(state);
-    drawMinimap(state);
-  }
+    }
 
   updateConstructionOverlays();
   updateHealthOverlays();
