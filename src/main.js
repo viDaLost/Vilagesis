@@ -114,7 +114,7 @@ async function bootstrap() {
     sceneCtx.resize();
     drawMinimap(state);
     refreshConstructionOverlays();
-  }));
+  });
 }
 
 setTimeout(() => {
