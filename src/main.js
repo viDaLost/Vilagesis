@@ -1,4 +1,3 @@
-
 function syncViewportHeight() {
   const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   document.documentElement.style.setProperty('--app-height', `${Math.round(h)}px`);
@@ -134,7 +133,6 @@ async function spawnCapital() {
   state.resources.workers = 5;
   capital.level = 1;
 
-  // ФИЗИЧЕСКИ СОЗДАЕМ 5 РАБОЧИХ ВОКРУГ СТОЛИЦЫ
   for (let i = 0; i < 5; i++) {
     const randomPos = new THREE.Vector3(center.pos.x + (Math.random() - 0.5) * 1.5, center.height, center.pos.z + (Math.random() - 0.5) * 1.5);
     spawnUnit(sceneCtx, state, 'worker', randomPos, null);
@@ -279,7 +277,7 @@ function openTappedBuildingMenu(tile, building) {
       updateSelection(state);
       renderRoads(sceneCtx, state);
     },
-  }));
+  });
 }
 
 function onTileSelected(tile) {
@@ -355,7 +353,7 @@ function hookButtons() {
 
   $$('[data-action]').forEach((btn) => {
     btn.onclick = () => handleAction(btn.dataset.action);
-  }));
+  });
 }
 
 function setSpeedButton(speed) {
@@ -407,7 +405,7 @@ function bindTrainButtons() {
       openTrainMenu(state, () => {});
       bindTrainButtons();
     };
-  }));
+  });
 }
 
 function showRules() {
@@ -462,7 +460,7 @@ function pointerGhostMove(e) {
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       mats.forEach((m) => { if (m.color) m.color.setHex(ok ? 0xb3ff84 : 0xff7b6f); });
     }
-  }));
+  });
 }
 
 function removeGhost() {
@@ -522,7 +520,7 @@ function updateDayNightVisual(dt) {
     } else {
       b.mesh.scale.setScalar(1);
     }
-  }));
+  });
 }
 
 function maybeAutoSave(dt) {
@@ -562,7 +560,7 @@ function refreshConstructionOverlays() {
     el.dataset.jobId = job.id;
     el.textContent = `${Math.max(0, Math.ceil(job.buildTime - job.progress))}с`;
     wrap.appendChild(el);
-  }));
+  });
 }
 
 function updateConstructionOverlays() {
@@ -582,7 +580,7 @@ function updateConstructionOverlays() {
     el.style.display = offscreen ? 'none' : 'block';
     el.style.transform = `translate(${x}px, ${y}px)`;
     el.textContent = `${Math.max(0, Math.ceil(job.buildTime - job.progress))}с`;
-  }));
+  });
 }
 
 function ensureHealthEl(id) {
@@ -592,7 +590,7 @@ function ensureHealthEl(id) {
   el = document.createElement('div');
   el.className = 'health-bar';
   el.dataset.healthId = id;
-  el.innerHTML = '<div class="health-caption"></div><div class="health-track"><div class="health-fill"></div></div>'; 
+  el.innerHTML = '<div class="health-caption"></div><div class="health-track"><div class="health-fill"></div></div>';
   wrap.appendChild(el);
   return el;
 }
@@ -624,7 +622,7 @@ function updateHealthOverlays() {
   });
   wrap.querySelectorAll('.health-bar').forEach((el) => {
     if (!active.has(el.dataset.healthId)) el.remove();
-  }));
+  });
 }
 
 function spawnConstructionDust(dt) {
@@ -646,7 +644,7 @@ function spawnConstructionDust(dt) {
         kind: 'burst'
       });
     }
-  }));
+  });
 }
 
 async function stepSimulation(dt) {
@@ -671,7 +669,6 @@ async function stepSimulation(dt) {
   }
   spawnConstructionDust(dt);
 
-  // Теперь units.js сам управляет своим временем!
   autoSpawnWorkers(sceneCtx, state, dt, notify);
 
   if (state.seasonTime >= GAME_CONFIG.seasonDuration) {
