@@ -24,10 +24,10 @@ export function createScene(canvas) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = innerWidth < 760 ? 1.45 : 1.35;
+  renderer.toneMappingExposure = innerWidth < 760 ? 1.18 : 1.12;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xded7c8, 95, 250);
+  scene.fog = new THREE.Fog(0xcfe0ea, 120, 320);
 
   const camera = new THREE.PerspectiveCamera(innerWidth < 760 ? 52 : 50, innerWidth / innerHeight, .1, 800);
   camera.position.set(innerWidth < 760 ? 18 : 22, innerWidth < 760 ? 21 : 26, innerWidth < 760 ? 18 : 21);
@@ -73,8 +73,8 @@ export function createScene(canvas) {
     new THREE.ShaderMaterial({
       side: THREE.BackSide,
       uniforms: {
-        topColor: { value: new THREE.Color(0xbfd8ef) },
-        bottomColor: { value: new THREE.Color(0xf6f0e4) },
+        topColor: { value: new THREE.Color(0x9dd0ee) },
+        bottomColor: { value: new THREE.Color(0xf7fbff) },
         offset: { value: 20 },
         exponent: { value: .7 }
       },
@@ -115,7 +115,8 @@ export function createScene(canvas) {
     new THREE.CylinderGeometry(54, 64, 8, 48),
     new THREE.MeshStandardMaterial({ color: 0x5a4129, roughness: 1 })
   );
-  worldBase.position.y = -5.6;
+  worldBase.position.y = -15;
+  worldBase.visible = false;
   worldBase.receiveShadow = true;
   scene.add(worldBase);
 

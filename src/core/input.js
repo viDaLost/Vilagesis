@@ -17,7 +17,7 @@ export function setupInput(sceneCtx, state, handlers) {
   controls.mouseButtons.RIGHT = MOUSE.ROTATE;
 
   const closeTransientUi = (target) => {
-    if (target.closest('#context-drawer, #bottom-dock, #top-bar, #hud-strip, #side-panels, #modal-window')) return;
+    if (target.closest('#context-drawer, #bottom-dock, #top-bar, #hud-strip, #side-panels, #modal-window, #unit-action-menu')) return;
     closeDrawer();
     closeModal();
   };
@@ -82,7 +82,7 @@ export function setupInput(sceneCtx, state, handlers) {
     if (unitHits.length) {
       const unitObj = unitHits[0].object;
       const unit = state.units.find((u) => u.mesh === unitObj.parent || u.mesh === unitObj || u.mesh.children.includes(unitObj));
-      if (unit) return handlers.onUnit(unit);
+      if (unit) return handlers.onUnit(unit, e);
     }
 
     const buildingHits = raycaster.intersectObjects(groups.buildings.children, true);
