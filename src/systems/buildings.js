@@ -25,7 +25,6 @@ function scaleForBuilding(type, level) {
   return (base[type] || 1.0) * (1 + (level - 1) * .1);
 }
 
-
 function buildingBaseLift(type) {
   return {
     capital: 0.18,
@@ -36,21 +35,17 @@ function buildingBaseLift(type) {
   }[type] || 0.02;
 }
 
+// Теперь здание ищет самую ВЫСОКУЮ точку на своей клетке, чтобы не проваливаться
 function sampleBuildingAnchorY(tile, type) {
   const points = [
-    [0, 0],
-    [0.42, 0],
-    [-0.42, 0],
-    [0, 0.42],
-    [0, -0.42],
-    [0.28, 0.28],
-    [-0.28, -0.28],
+    [0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4], [0.25, 0.25], [-0.25, -0.25]
   ];
-  let y = -Infinity;
+  let maxY = -Infinity;
   for (const [ox, oz] of points) {
-    y = Math.max(y, sampleTileSurfaceY(tile, tile.pos.x + ox, tile.pos.z + oz));
+    const y = sampleTileSurfaceY(tile, tile.pos.x + ox, tile.pos.z + oz);
+    if (y > maxY) maxY = y;
   }
-  return y + buildingBaseLift(type);
+  return maxY + buildingBaseLift(type);
 }
 
 export function getUpgradeCost(type, nextLevel) {
@@ -74,7 +69,13 @@ export function canPlaceBuilding(state, type, tile) {
   const cfg = BUILDINGS[type];
   if (!cfg || !tile) return false;
   if (!isTileInsideTerritory(state, tile)) return false;
-  if (!tile || tile.type === 'water' || tile.buildingId) return false;
+  
+  // СТРОГИЕ ПРОВЕРКИ: Никакой воды и гор (если это не шахта)
+  if (tile.type === 'water' || tile.type === 'river') return false;
+  if (tile.buildingId) return false;
+  if (type !== 'mine' && tile.type === 'rock') return false; 
+  if (type === 'mine' && tile.type !== 'hill' && tile.type !== 'rock') return false;
+
   if (cfg.minEra != null && state.era < cfg.minEra) return false;
   if (type === 'barracks' && !state.buildings.some((b) => b.type === 'lumber')) return false;
   if (type === 'market' && !state.buildings.some((b) => b.type === 'farm')) return false;
@@ -82,6 +83,7 @@ export function canPlaceBuilding(state, type, tile) {
   if (type === 'academy' && !state.buildings.some((b) => b.type === 'market')) return false;
   if (cfg.terrain && !cfg.terrain.includes(tile.type)) return false;
   if (type === 'wonder' && state.buildings.some((b) => b.type === 'wonder')) return false;
+  
   return true;
 }
 
@@ -113,12 +115,7 @@ export function placeConstruction(state, type, tile) {
   const cfg = BUILDINGS[type];
   const id = `c-${buildingId++}`;
   const job = {
-    id,
-    type,
-    tileId: tile.id,
-    progress: 0,
-    buildTime: cfg.baseBuildTime,
-    mode: 'new',
+    id, type, tileId: tile.id, progress: 0, buildTime: cfg.baseBuildTime, mode: 'new',
   };
   state.construction.push(job);
   tile.buildingId = id;
@@ -131,14 +128,9 @@ export function startUpgrade(state, building) {
   if (!hasCost(state.resources, cost)) return null;
   payCost(state.resources, cost);
   const job = {
-    id: `c-${buildingId++}`,
-    type: building.type,
-    buildingId: building.id,
-    tileId: building.tileId,
-    progress: 0,
-    buildTime: getUpgradeTime(building.type, nextLevel),
-    mode: 'upgrade',
-    targetLevel: nextLevel,
+    id: `c-${buildingId++}`, type: building.type, buildingId: building.id,
+    tileId: building.tileId, progress: 0, buildTime: getUpgradeTime(building.type, nextLevel),
+    mode: 'upgrade', targetLevel: nextLevel,
   };
   state.construction.push(job);
   building.upgrading = true;
@@ -203,40 +195,25 @@ export async function createGhostBuildingMesh(type) {
       if (obj.isMesh && obj.material) {
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
         mats.forEach((m) => {
-          m = m.clone();
-          m.transparent = true;
-          m.opacity = 0.38;
-          m.depthWrite = false;
-          obj.material = m;
+          m = m.clone(); m.transparent = true; m.opacity = 0.38; m.depthWrite = false; obj.material = m;
         });
       }
     });
     return model;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
-
 
 function makeTextSprite(text, color = '#ffe7a8', bg = 'rgba(36,14,5,0.65)', scale = 1) {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 96;
+  canvas.width = 256; canvas.height = 96;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = bg;
   ctx.beginPath();
   ctx.roundRect?.(10, 12, 236, 72, 28);
-  if (!ctx.roundRect) {
-    ctx.fillRect(10, 12, 236, 72);
-  }
+  if (!ctx.roundRect) ctx.fillRect(10, 12, 236, 72);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,214,107,0.35)';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(10, 12, 236, 72);
-  ctx.fillStyle = color;
-  ctx.font = '700 42px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.strokeStyle = 'rgba(255,214,107,0.35)'; ctx.lineWidth = 4; ctx.strokeRect(10, 12, 236, 72);
+  ctx.fillStyle = color; ctx.font = '700 42px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(text, 128, 50);
   const tex = new THREE.CanvasTexture(canvas);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
@@ -253,10 +230,7 @@ function starCountForLevel(level) {
 }
 
 function updateBuildingBadge(building) {
-  if (building.levelBadge) {
-    building.mesh.remove(building.levelBadge);
-    building.levelBadge = null;
-  }
+  if (building.levelBadge) { building.mesh.remove(building.levelBadge); building.levelBadge = null; }
   const count = starCountForLevel(building.level);
   if (!count) return;
   const badge = makeTextSprite('★'.repeat(count), '#ffe39a', 'rgba(29,12,4,0.55)', 1 + Math.min(0.3, count * 0.04));
@@ -290,26 +264,10 @@ export async function finishConstruction(sceneCtx, state, job) {
   clearDecorOnTile(sceneCtx, tile);
 
   const entity = {
-    id: `b-${buildingId++}`,
-    type: job.type,
-    tileId: tile.id,
-    level: 1,
-    hp: cfg.health,
-    maxHp: cfg.health,
-    cooldown: 0,
-    trainQueue: [],
-    mesh: new THREE.Group(),
-    selection: null,
-    glow: null,
-    hitFlash: 0,
-    upgrading: false,
-    extraMeshes: [],
-    levelBadge: null,
-    rallyTileId: null,
-    workerDemand: 0,
-    activeWorkers: 0,
-    workerRatio: 1,
-    blockRadius: 0.9 + (job.type === 'capital' ? 1.2 : 0)
+    id: `b-${buildingId++}`, type: job.type, tileId: tile.id, level: 1, hp: cfg.health, maxHp: cfg.health,
+    cooldown: 0, trainQueue: [], mesh: new THREE.Group(), selection: null, glow: null, hitFlash: 0,
+    upgrading: false, extraMeshes: [], levelBadge: null, rallyTileId: null, workerDemand: 0, activeWorkers: 0,
+    workerRatio: 1, blockRadius: 0.9 + (job.type === 'capital' ? 1.2 : 0)
   };
 
   const placeholder = makeFallbackMesh(job.type === 'capital' ? 0xc9a45b : 0xa8844d);
@@ -328,15 +286,10 @@ export async function finishConstruction(sceneCtx, state, job) {
     entity.mesh.add(model);
   }).catch(() => {});
 
-  const ring = selectionRing();
-  ring.position.y = 0.05;
-  entity.mesh.add(ring);
-  entity.selection = ring;
-
+  const ring = selectionRing(); ring.position.y = 0.05; entity.mesh.add(ring); entity.selection = ring;
   const light = new THREE.PointLight(0xffcc88, job.type === 'capital' ? 1.2 : 0.82, job.type === 'capital' ? 9 : 6);
-  light.position.set(0, 2.2, 0);
-  entity.mesh.add(light);
-  entity.glow = light;
+  light.position.set(0, 2.2, 0); entity.mesh.add(light); entity.glow = light;
+  
   entity.mesh.userData.tileId = tile.id;
   entity.mesh.position.set(tile.pos.x, anchorY, tile.pos.z);
   sceneCtx.groups.buildings.add(entity.mesh);
@@ -347,22 +300,15 @@ export async function finishConstruction(sceneCtx, state, job) {
 
   if (cfg.territory) state.territoryRadius += cfg.territory;
   if (state.techs.has('stonework') && ['wall', 'tower', 'temple'].includes(job.type)) {
-    entity.maxHp = Math.round(entity.maxHp * 1.18);
-    entity.hp = entity.maxHp;
+    entity.maxHp = Math.round(entity.maxHp * 1.18); entity.hp = entity.maxHp;
   }
   if (job.type === 'wonder') state.stats.wonderBuilt = 1;
   if (job.type === 'farm') spawnFarmBeds(sceneCtx, tile, entity);
   return entity;
 }
 
-export function getBuildingById(state, id) {
-  return state.buildings.find((b) => b.id === id) || null;
-}
-
-export function getBuildingOnTile(state, tile) {
-  if (!tile?.buildingId) return null;
-  return getBuildingById(state, tile.buildingId);
-}
+export function getBuildingById(state, id) { return state.buildings.find((b) => b.id === id) || null; }
+export function getBuildingOnTile(state, tile) { if (!tile?.buildingId) return null; return getBuildingById(state, tile.buildingId); }
 
 export function getBuildingWorkerDemand(building) {
   const cfg = BUILDINGS[building.type];
@@ -395,39 +341,23 @@ export function computeBuildingYield(state, building) {
     if (tile.type === 'rock') out.stone += .18;
     if (tile.type === 'hill') out.gold += .06;
   }
-  if (building.type === 'market') {
-    out.gold += neighbors.filter((n) => n.buildingId).length * .04;
-  }
+  if (building.type === 'market') out.gold += neighbors.filter((n) => n.buildingId).length * .04;
   if (building.type === 'temple' && tile.type === 'sacred') out.prestige += .12;
   if (building.type === 'academy' && state.techs.has('archives')) out.knowledge += .08;
   if (building.type === 'tower' && state.techs.has('discipline')) out.defense += .25;
-  if (building.type === 'capital' && state.era > 0) {
-    out.gold += .14 * state.era;
-    out.populationCap += 2 * state.era;
-  }
+  if (building.type === 'capital' && state.era > 0) { out.gold += .14 * state.era; out.populationCap += 2 * state.era; }
 
-  if (['farm', 'lumber', 'mine'].includes(building.type)) {
-    delete out.food;
-    delete out.wood;
-    delete out.stone;
-    delete out.gold;
-  }
+  if (['farm', 'lumber', 'mine'].includes(building.type)) { delete out.food; delete out.wood; delete out.stone; delete out.gold; }
 
   const workerStatus = getBuildingWorkerStatus(state, building);
-  building.workerDemand = workerStatus.demand;
-  building.activeWorkers = workerStatus.assigned;
-  building.workerRatio = workerStatus.ratio;
+  building.workerDemand = workerStatus.demand; building.activeWorkers = workerStatus.assigned; building.workerRatio = workerStatus.ratio;
   if (workerStatus.demand && !['capital', 'barracks', 'wall', 'tower'].includes(building.type)) {
-    Object.keys(out).forEach((key) => {
-      if (key !== 'populationCap' && key !== 'defense') out[key] *= workerStatus.ratio;
-    });
+    Object.keys(out).forEach((key) => { if (key !== 'populationCap' && key !== 'defense') out[key] *= workerStatus.ratio; });
   }
   return out;
 }
 
-export function getCapital(state) {
-  return state.buildings.find((b) => b.type === 'capital') || null;
-}
+export function getCapital(state) { return state.buildings.find((b) => b.type === 'capital') || null; }
 
 export function buildingCenter(state, building) {
   const tile = state.mapIndex.get(building.tileId);
@@ -439,10 +369,7 @@ export function getBuildingStatus(state, building) {
   const cfg = BUILDINGS[building.type];
   const canUpgrade = canUpgradeBuilding(state, building);
   return {
-    cfg,
-    canUpgrade,
-    upgradeCost: getUpgradeCost(building.type, building.level + 1),
-    upgradeTime: getUpgradeTime(building.type, building.level + 1),
-    repairNeeded: building.hp < building.maxHp * .96,
+    cfg, canUpgrade, upgradeCost: getUpgradeCost(building.type, building.level + 1),
+    upgradeTime: getUpgradeTime(building.type, building.level + 1), repairNeeded: building.hp < building.maxHp * .96,
   };
 }
