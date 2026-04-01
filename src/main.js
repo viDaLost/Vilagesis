@@ -21,9 +21,9 @@ import { openBuildMenu, openQuickBuildMenu, openResearchMenu, openTrainMenu, bin
 import { setupModal, openModal, closeModal } from './ui/modal.js';
 import { updateSelection } from './ui/selection.js';
 import { setupInput } from './core/input.js';
-import { canPlaceBuilding, hasCost, payCost, placeConstruction, finishConstruction, getBuildingById, getBuildingOnTile, getCapital, startUpgrade, repairBuilding, destroyBuilding, createGhostBuildingMesh } from './systems/buildings.js';
+import { canPlaceBuilding, hasCost, payCost, placeConstruction, finishConstruction, getBuildingById, getBuildingOnTile, getCapital, startUpgrade, repairBuilding, destroyBuilding, createGhostBuildingMesh, buildingCenter } from './systems/buildings.js';
 import { applyRealTimeEconomy, updateConstruction, collectFinishedConstruction, updateEra, updateObjectives, updateResearch } from './systems/economy.js';
-import { autoSpawnWorkers, queueTraining, updateTraining, updateUnits, spawnUnit } from './systems/units.js';
+import { autoSpawnWorkers, queueTraining, updateTraining, updateUnits, spawnUnit, spawnPointNearBuilding } from './systems/units.js';
 import { updateDefense, updateProjectiles, spawnCollapse } from './systems/combat.js';
 import { maybeChangeWeather, updateEnemyWaves, updateEnvironmentState } from './systems/events.js';
 import { saveGame, clearSave } from './systems/persistence.js';
@@ -124,22 +124,11 @@ async function spawnCapital() {
   const capital = await finishConstruction(sceneCtx, state, job);
   state.capitalId = capital.id;
   center.buildingId = capital.id;
-  state.resources.population = 6;
-  state.resources.workers = 5;
+  state.resources.population = 4;
+  state.resources.workers = 0;
   capital.level = 1;
 
-  for (let i = 0; i < 5; i++) {
-    const randomPos = new THREE.Vector3(center.pos.x + (Math.random() - 0.5) * 1.5, center.height, center.pos.z + (Math.random() - 0.5) * 1.5);
-    spawnUnit(sceneCtx, state, 'worker', randomPos, null);
-  }
-
   const neighbors = getNeighbors(state, center).filter((t) => t.type !== 'water');
-  for (const tile of neighbors) {
-    if (!canPlaceBuilding(state, 'wall', tile)) continue;
-    const build = placeConstruction(state, 'wall', tile);
-    build.progress = build.buildTime;
-  }
-
   const outerRing = [];
   neighbors.forEach((n) => {
     getNeighbors(state, n).forEach((candidate) => {
@@ -148,10 +137,18 @@ async function spawnCapital() {
     });
   });
 
+  const used = new Set();
+  const pickStarterTile = (allowedTypes) => {
+    let tile = outerRing.find((t) => allowedTypes.includes(t.type) && !t.buildingId && !used.has(t.id));
+    if (!tile) tile = outerRing.find((t) => !t.buildingId && !used.has(t.id));
+    if (tile) used.add(tile.id);
+    return tile;
+  };
+
   const starter = [
-    ['farm', outerRing.find((t) => ['grass', 'fertile', 'river'].includes(t.type) && !t.buildingId)],
-    ['lumber', outerRing.find((t) => ['forest', 'grass'].includes(t.type) && !t.buildingId)],
-    ['mine', outerRing.find((t) => ['hill', 'rock'].includes(t.type) && !t.buildingId)],
+    ['farm', pickStarterTile(['grass', 'fertile', 'river'])],
+    ['lumber', pickStarterTile(['forest', 'grass'])],
+    ['mine', pickStarterTile(['hill', 'rock'])],
   ];
   for (const [type, tile] of starter) {
     if (!tile) continue;
@@ -159,7 +156,24 @@ async function spawnCapital() {
     build.progress = build.buildTime;
   }
   const completed = collectFinishedConstruction(state);
-  for (const done of completed) await finishConstruction(sceneCtx, state, done);
+  const finishedBuildings = [];
+  for (const done of completed) {
+    const built = await finishConstruction(sceneCtx, state, done);
+    if (built) finishedBuildings.push(built);
+  }
+
+  finishedBuildings
+    .filter((b) => ['farm', 'lumber', 'mine'].includes(b.type))
+    .forEach((building, index) => {
+      const spawnPos = spawnPointNearBuilding(state, building, index) || buildingCenter(state, building).clone();
+      const worker = spawnUnit(sceneCtx, state, 'worker', spawnPos, null);
+      worker.assignedBuildingId = building.id;
+      worker.awaitingWork = false;
+      worker.taskPhase = building.type === 'farm' ? 'toBuilding' : 'toCapital';
+      worker.gatherCooldown = 0;
+      worker.forceJob = false;
+    });
+
   state.resources.gold = Math.max(state.resources.gold, 140);
   state.resources.food = Math.max(state.resources.food, 120);
   state.resources.wood = Math.max(state.resources.wood, 95);
@@ -385,7 +399,7 @@ function ensureUnitActionMenu() {
   menu.innerHTML = `
     <div class="panel-title">Юнит</div>
     <button class="card-btn" data-unit-action="move">Следовать на место</button>
-    <button class="card-btn" data-unit-action="work">Выполнять работу</button>
+    <button class="card-btn" data-unit-action="work">Найти работу</button>
   `;
   document.getElementById('ui-root').appendChild(menu);
   menu.querySelector('[data-unit-action="move"]').onclick = () => {
@@ -405,7 +419,7 @@ function ensureUnitActionMenu() {
     unit.commandTarget = null;
     unit.patrolCenter = null;
     unit.mode = 'work';
-    notify('Юнит ищет ближайшую свободную работу');
+    notify('Рабочий ищет ближайшее свободное здание');
     closeUnitActionMenu();
   };
   document.addEventListener('pointerdown', (e) => {
